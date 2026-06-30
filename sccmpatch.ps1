@@ -60,6 +60,8 @@ Write-ProxyLog "Process begins (Stage: $Stage, Proxies: $($Proxies -join ', '))"
 Import-Module Veeam.Backup.PowerShell -ErrorAction Stop
 
 try {
+    $ErrorActionPreference = 'Stop'
+
     #------------------------------------------------------------
     # Common: get proxy objects
     #------------------------------------------------------------
@@ -77,17 +79,24 @@ try {
 
         # Drain running tasks (fixed filtering)
         Write-ProxyLog ">>> Waiting for active tasks to drain…" -ToConsole
+        $ProxyIdSet = @{}
+        foreach ($p in $ProxyObjs) { $ProxyIdSet[$p.Id] = $p.Name }
         $StartTime = Get-Date
         do {
             $runningSessions = Get-VBRBackupSession | Where-Object { $_.State -eq "Working" }
-            $runningTasks = $runningSessions | Get-VBRTaskSession | Where-Object { $_.Status -eq "InProgress" }
+            $runningTasks = @()
+            if ($runningSessions) {
+                $runningTasks = @($runningSessions | Get-VBRTaskSession | Where-Object { $_.Status -eq "InProgress" })
+            }
             $Busy = $false
             foreach ($task in $runningTasks) {
-                $proxyId = $task.Info.WorkDetails.SourceProxyId
-                $proxy = Get-VBRViProxy | Where-Object { $_.Id -eq $proxyId }
-                if ($Proxies -contains $proxy.Name) {
+                $proxyId = $null
+                if ($task.Info -and $task.Info.WorkDetails) {
+                    $proxyId = $task.Info.WorkDetails.SourceProxyId
+                }
+                if ($proxyId -and $ProxyIdSet.ContainsKey($proxyId)) {
                     $Busy = $true
-                    Write-ProxyLog "Task still active on proxy $($proxy.Name): $($task.Name)" 'WARN' -ToConsole
+                    Write-ProxyLog "Task still active on proxy $($ProxyIdSet[$proxyId]): $($task.Name)" 'WARN' -ToConsole
                     break
                 }
             }
